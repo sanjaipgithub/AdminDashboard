@@ -1,0 +1,94 @@
+const express = require("express");
+const bodyParser = require('body-parser');
+const mongoose = require('mongoose');
+const speakeasy = require("speakeasy");
+const QRCode = require('qrcode');
+const app = express();
+
+mongoose.connect('mongodb://localhost:27017/tfaExample', { useNewUrlParser: true, useUnifiedTopology: true });
+const userSchema = new mongoose.Schema({
+    id: String,
+    secret: {
+        base32: String,
+        otpauth_url: String
+    },
+    tfaEnabled: { type: Boolean, default: false }
+});
+const User = mongoose.model('User', userSchema);
+
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({
+    extended: true
+}));
+
+app.get("/api", (req, res) => {
+    res.json({
+        message: "Welcome to the two-factor authentication example"
+    });
+});
+
+app.post("/api/signup", async (req, res) => {
+    const id = mongoose.Types.ObjectId();
+
+    try {
+        const user = new User({ id });
+        user.secret = speakeasy.generateSecret();
+        await user.save();
+
+        // Generate OTP Auth URL and create QR code
+        const otpauth_url = speakeasy.otpauthURL({
+            secret: user.secret.ascii,
+            label: `TFA Example - ${id}`,
+            issuer: 'TFA Example'
+        });
+        user.secret.otpauth_url = otpauth_url;
+        await user.save();
+
+        const qrCode = await QRCode.toDataURL(otpauth_url);
+
+        res.json({
+            id,
+            otpauth_url,
+            qrCode
+        });
+    } catch (e) {
+        console.log(e);
+        res.status(500).json({
+            message: 'Error generating secret key'
+        });
+    }
+});
+
+// Other routes remain unchanged
+
+// Additional route to enable/disable TFA
+app.post("/api/tfa-toggle", async (req, res) => {
+    const { userId, enable } = req.body;
+
+    try {
+        const user = await User.findById(userId);
+
+        if (user) {
+            user.tfaEnabled = enable;
+            await user.save();
+
+            res.json({
+                tfaEnabled: enable
+            });
+        } else {
+            res.status(404).json({
+                message: 'User not found'
+            });
+        }
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            message: 'Error toggling TFA'
+        });
+    }
+});
+
+const port = 9000;
+app.listen(port, () => {
+    console.log(`App is running on PORT: ${port}.`);
+});
