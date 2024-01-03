@@ -134,8 +134,6 @@ app.listen(port, () => {
 
 
 
-
-
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
@@ -145,6 +143,7 @@ const App = () => {
   const [otpauthUrl, setOtpauthUrl] = useState('');
   const [qrCode, setQrCode] = useState('');
   const [tfaEnabled, setTfaEnabled] = useState(false);
+  const [otpToEnable, setOtpToEnable] = useState('');
   const [otpToDisable, setOtpToDisable] = useState('');
 
   useEffect(() => {
@@ -179,8 +178,14 @@ const App = () => {
   const handleToggleTFA = async (enable) => {
     try {
       if (enable) {
-        setOtpToDisable('');
-        setTfaEnabled(true);
+        // If enabling, verify with server using the entered OTP
+        const response = await axios.post('/api/validate', { userId, token: otpToEnable });
+        if (response.data.validated) {
+          setTfaEnabled(true);
+          setOtpToEnable('');
+        } else {
+          console.log('OTP verification failed');
+        }
       } else {
         // If disabling, verify with server using the entered OTP
         const response = await axios.post('/api/validate', { userId, token: otpToDisable });
@@ -228,10 +233,20 @@ const App = () => {
           <button onClick={() => handleToggleTFA(false)}>Disable TFA</button>
         </div>
       ) : (
-        <button onClick={() => handleToggleTFA(true)}>Enable TFA</button>
+        <div>
+          <input
+            type="text"
+            placeholder="Enter OTP to enable TFA"
+            value={otpToEnable}
+            onChange={(e) => setOtpToEnable(e.target.value)}
+          />
+          <button onClick={() => handleToggleTFA(true)}>Enable TFA</button>
+        </div>
       )}
     </div>
   );
 };
 
 export default App;
+
+
