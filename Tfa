@@ -59,9 +59,47 @@ app.post("/api/signup", async (req, res) => {
     }
 });
 
-// Other routes remain unchanged
+app.post("/api/verify", async (req, res) => {
+    const { userId, token } = req.body;
 
-// Additional route to enable/disable TFA
+    try {
+        const user = await User.findById(userId);
+
+        if (user) {
+            const { base32: secret } = user.secret;
+            const verified = speakeasy.totp.verify({
+                secret,
+                encoding: 'base32',
+                token
+            });
+
+            if (verified) {
+                // Update user data
+                user.tfaEnabled = true;
+                await user.save();
+
+                res.json({
+                    verified: true
+                });
+            } else {
+                res.json({
+                    verified: false
+                });
+            }
+        } else {
+            res.status(404).json({
+                message: 'User not found'
+            });
+        }
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({
+            message: 'Error retrieving user'
+        });
+    }
+});
+
 app.post("/api/tfa-toggle", async (req, res) => {
     const { userId, enable } = req.body;
 
@@ -92,3 +130,108 @@ const port = 9000;
 app.listen(port, () => {
     console.log(`App is running on PORT: ${port}.`);
 });
+
+
+
+
+
+
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+
+const App = () => {
+  const [userId, setUserId] = useState('');
+  const [token, setToken] = useState('');
+  const [otpauthUrl, setOtpauthUrl] = useState('');
+  const [qrCode, setQrCode] = useState('');
+  const [tfaEnabled, setTfaEnabled] = useState(false);
+  const [otpToDisable, setOtpToDisable] = useState('');
+
+  useEffect(() => {
+    // Fetch or set userId from your authentication system
+    setUserId('user123');
+  }, []);
+
+  const handleSignup = async () => {
+    try {
+      const response = await axios.post('/api/signup');
+      setUserId(response.data.id);
+      setOtpauthUrl(response.data.otpauth_url);
+      setQrCode(response.data.qrCode);
+    } catch (error) {
+      console.error('Error signing up:', error.response.data.message);
+    }
+  };
+
+  const handleVerify = async () => {
+    try {
+      const response = await axios.post('/api/verify', { userId, token });
+      if (response.data.verified) {
+        setTfaEnabled(true);
+      } else {
+        console.log('Token verification failed');
+      }
+    } catch (error) {
+      console.error('Error verifying token:', error.response.data.message);
+    }
+  };
+
+  const handleToggleTFA = async (enable) => {
+    try {
+      if (enable) {
+        setOtpToDisable('');
+        setTfaEnabled(true);
+      } else {
+        // If disabling, verify with server using the entered OTP
+        const response = await axios.post('/api/validate', { userId, token: otpToDisable });
+        if (response.data.validated) {
+          setTfaEnabled(false);
+          setOtpToDisable('');
+        } else {
+          console.log('OTP verification failed');
+        }
+      }
+    } catch (error) {
+      console.error('Error toggling TFA:', error.response.data.message);
+    }
+  };
+
+  return (
+    <div>
+      <h1>Two-Factor Authentication Example</h1>
+
+      <button onClick={handleSignup}>Sign Up</button>
+
+      {otpauthUrl && (
+        <div>
+          <img src={qrCode} alt="QR Code" />
+          <p>Scan the QR code with your authenticator app</p>
+        </div>
+      )}
+
+      {tfaEnabled ? (
+        <div>
+          <p>Two-Factor Authentication is enabled</p>
+          <input
+            type="text"
+            placeholder="Enter your verification code"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+          />
+          <button onClick={handleVerify}>Verify</button>
+          <input
+            type="text"
+            placeholder="Enter OTP to disable TFA"
+            value={otpToDisable}
+            onChange={(e) => setOtpToDisable(e.target.value)}
+          />
+          <button onClick={() => handleToggleTFA(false)}>Disable TFA</button>
+        </div>
+      ) : (
+        <button onClick={() => handleToggleTFA(true)}>Enable TFA</button>
+      )}
+    </div>
+  );
+};
+
+export default App;
